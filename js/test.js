@@ -337,12 +337,7 @@ function updateStatusBar() {
     return;
   }
 
-  const questions = getRandomQuestions(category);
-  if (!questions.length) {
-    document.getElementById("test-root").innerHTML =
-      '<p class="error-msg">No questions for this category. Check js/questions.js.</p>';
-    return;
-  }
+  let questions = [];
 
   const form = document.getElementById("test-form");
   const timerEl = document.getElementById("timer-display");
@@ -351,36 +346,39 @@ function updateStatusBar() {
 
   categoryEl.textContent = category;
 
-  // Render questions
   const container = document.getElementById("questions-container");
-  questions.forEach(function (q, i) {
-    const block = document.createElement("div");
-    block.className = "question-block";
-    block.innerHTML =
-      "<h3>" +
-      (i + 1) +
-      ". " +
-      escapeHtml(q.question) +
-      "</h3><div class='options' data-q-index='" +
-      i +
-      "'></div>";
-    const opts = block.querySelector(".options");
-    q.options.forEach(function (opt, j) {
-      const id = "q" + i + "_o" + j;
-      const label = document.createElement("label");
-      label.innerHTML =
-        '<input type="radio" name="q' +
+
+  function renderQuestions(qs) {
+    container.innerHTML = "";
+    qs.forEach(function (q, i) {
+      const block = document.createElement("div");
+      block.className = "question-block";
+      block.innerHTML =
+        "<h3>" +
+        (i + 1) +
+        ". " +
+        escapeHtml(q.question) +
+        "</h3><div class='options' data-q-index='" +
         i +
-        '" value="' +
-        j +
-        '" id="' +
-        id +
-        '"> ' +
-        escapeHtml(opt);
-      opts.appendChild(label);
+        "'></div>";
+      const opts = block.querySelector(".options");
+      q.options.forEach(function (opt, j) {
+        const id = "q" + i + "_o" + j;
+        const label = document.createElement("label");
+        label.innerHTML =
+          '<input type="radio" name="q' +
+          i +
+          '" value="' +
+          j +
+          '" id="' +
+          id +
+          '"> ' +
+          escapeHtml(opt);
+        opts.appendChild(label);
+      });
+      container.appendChild(block);
     });
-    container.appendChild(block);
-  });
+  }
 
   let remaining = DURATION_SEC;
   let ended = false;
@@ -460,6 +458,46 @@ function updateStatusBar() {
   createStatusBar();
   const statusBar = document.getElementById('security-status-bar');
   if (statusBar) statusBar.style.display = 'none';
+
+  // ---- Load questions in background while the start overlay is shown ----
+  if (startButton) {
+    startButton.disabled = true;
+    const btnTextEl = startButton.querySelector('.btn-start__text');
+    if (btnTextEl) btnTextEl.textContent = 'Loading questions…';
+  }
+  container.innerHTML = '<p class="ai-questions-loading">✦ Generating AI questions for <strong>' +
+    escapeHtml(category || '') + '</strong>…</p>';
+
+  async function loadAndRenderQuestions() {
+    var questionsLoadedFromAi = false;
+    if (typeof fetchAiQuestions === "function") {
+      try {
+        var aiQs = await fetchAiQuestions(category);
+        if (aiQs && aiQs.length) {
+          questions = aiQs;
+          questionsLoadedFromAi = true;
+        }
+      } catch (e) {
+        // silently fall through to static bank
+      }
+    }
+    if (!questionsLoadedFromAi) {
+      questions = getRandomQuestions(category);
+    }
+    if (!questions.length) {
+      document.getElementById("test-root").innerHTML =
+        '<p class="error-msg">No questions for this category. Check js/questions.js.</p>';
+      return;
+    }
+    renderQuestions(questions);
+    if (startButton) {
+      startButton.disabled = false;
+      const btnTextEl = startButton.querySelector('.btn-start__text');
+      if (btnTextEl) btnTextEl.textContent = 'Start Exam';
+    }
+  }
+
+  loadAndRenderQuestions();
   
   // Flag to track if exam has started
   let examStarted = false;
@@ -467,6 +505,10 @@ function updateStatusBar() {
   // Start exam function
   async function startExam() {
     if (examStarted) return;
+    if (!questions.length) {
+      showSecurityWarning('Questions are still loading. Please wait a moment.');
+      return;
+    }
     
     try {
       // Enter fullscreen

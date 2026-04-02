@@ -184,6 +184,73 @@ function parseFeedbackText(raw) {
 }
 
 /**
+ * Use Gemini to generate 10 MCQ questions for a category.
+ * @param {string} category
+ * @returns {Promise<Array<{question: string, options: string[], correctIndex: number}>>}
+ */
+async function fetchAiQuestions(category) {
+  var apiKey = typeof getGeminiApiKey === "function" ? getGeminiApiKey() : "";
+  if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY") {
+    throw new Error("GEMINI_KEY_MISSING");
+  }
+
+  const prompt = `Generate exactly 10 multiple-choice questions about ${category} for an interview preparation test.
+Return ONLY a valid JSON array with no markdown, no code fences, and no extra text outside the array.
+Use this exact format:
+[
+  {
+    "question": "Question text here?",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctIndex": 0
+  }
+]
+Rules:
+- Each question must have exactly 4 options.
+- correctIndex is the 0-based index of the correct option.
+- Questions should be factual and suitable for interview practice.
+- Vary difficulty from easy to medium-hard.
+- No duplicate questions.`;
+
+  const url =
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
+    encodeURIComponent(apiKey);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7 },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error("Gemini API error: " + res.status + " " + errText);
+  }
+
+  const data = await res.json();
+  const text =
+    data.candidates &&
+    data.candidates[0] &&
+    data.candidates[0].content &&
+    data.candidates[0].content.parts &&
+    data.candidates[0].content.parts[0]
+      ? data.candidates[0].content.parts[0].text
+      : "";
+
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error("Gemini did not return a JSON array");
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  if (!Array.isArray(parsed) || parsed.length < 10) {
+    throw new Error("Not enough questions returned by Gemini");
+  }
+
+  return parsed.slice(0, 10);
+}
+
+/**
  * Render feedback into a container as simple blocks with lists.
  */
 function renderFeedback(container, feedback) {
